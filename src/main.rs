@@ -109,7 +109,7 @@ fn main() -> Result<()> {
         .collect();
 
     let entry = Select::new("Select entry", entries)
-        .with_page_size(30)
+        .with_page_size(15)
         .prompt()?;
 
     if let Some(pw) = entry.password() {
