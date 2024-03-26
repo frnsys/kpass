@@ -75,10 +75,10 @@ fn cache_pass(password: &str) -> Result<()> {
 
 fn main() -> Result<()> {
     let db_path = shellexpand::tilde(DB_PATH);
-    let mut file = File::open(db_path.as_ref())?;
 
     let db = if let Some(pass) = try_load_pass()? {
         let key = DatabaseKey::new().with_password(&pass);
+        let mut file = File::open(db_path.as_ref())?;
         Database::open(&mut file, key).expect("Cache password is correct")
     } else {
         loop {
@@ -90,11 +90,16 @@ fn main() -> Result<()> {
                 .prompt()?;
 
             let key = DatabaseKey::new().with_password(&pass);
-            if let Ok(db) = Database::open(&mut file, key) {
-                cache_pass(&pass)?;
-                break db;
-            } else {
-                println!("! Failed to open database. Wrong password?");
+            let mut file = File::open(db_path.as_ref())?;
+            match Database::open(&mut file, key) {
+                Ok(db) => {
+                    cache_pass(&pass)?;
+                    break db;
+                }
+                Err(err) => {
+                    println!("! Failed to open database. Wrong password?");
+                    println!(">   {:?}", err);
+                }
             }
         }
     };
