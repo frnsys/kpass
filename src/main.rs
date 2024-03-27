@@ -1,16 +1,17 @@
 use std::{
+    env,
     fmt::{Display, Formatter},
     fs::File,
     path::Path,
+    process::exit,
 };
 
 use anyhow::Result;
-use clipboard_ext::{prelude::*, x11_bin::ClipboardContext};
 use cocoon::Cocoon;
 use inquire::{Password, PasswordDisplayMode, Select};
 use keepass::{db::NodeRef, Database, DatabaseKey};
+use wl_clipboard_rs::copy::{MimeType, Options, Source};
 
-const DB_PATH: &str = "~/docs/pass.kdbx";
 const PW_CACHE: &str = "/tmp/.kpw";
 
 /// A KeePass entry.
@@ -74,11 +75,16 @@ fn cache_pass(password: &str) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let db_path = shellexpand::tilde(DB_PATH);
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args.is_empty() {
+        println!("Please provide an database path.");
+        exit(1);
+    }
 
+    let db_path = Path::new(&args[0]);
     let db = if let Some(pass) = try_load_pass()? {
         let key = DatabaseKey::new().with_password(&pass);
-        let mut file = File::open(db_path.as_ref())?;
+        let mut file = File::open(db_path)?;
         Database::open(&mut file, key).expect("Cache password is correct")
     } else {
         loop {
@@ -90,7 +96,7 @@ fn main() -> Result<()> {
                 .prompt()?;
 
             let key = DatabaseKey::new().with_password(&pass);
-            let mut file = File::open(db_path.as_ref())?;
+            let mut file = File::open(db_path)?;
             match Database::open(&mut file, key) {
                 Ok(db) => {
                     cache_pass(&pass)?;
@@ -118,8 +124,11 @@ fn main() -> Result<()> {
         .prompt()?;
 
     if let Some(pw) = entry.password() {
-        let mut ctx = ClipboardContext::new().unwrap();
-        ctx.set_contents(pw.into()).unwrap();
+        let opts = Options::new();
+        opts.copy(
+            Source::Bytes(pw.to_string().into_bytes().into()),
+            MimeType::Autodetect,
+        )?;
         println!("> Copied to clipboard!");
     }
 
