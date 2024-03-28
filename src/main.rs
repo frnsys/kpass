@@ -8,14 +8,18 @@ use std::{
 
 use anyhow::Result;
 use cocoon::Cocoon;
-use inquire::{Password, PasswordDisplayMode, Select};
-use keepass::{db::NodeRef, Database, DatabaseKey};
+use inquire::{required, Confirm, Editor, Password, PasswordDisplayMode, Select, Text};
+use keepass::{
+    db::{Entry as KEntry, Group, Node, NodeRef, Value},
+    Database, DatabaseKey,
+};
+use passwords::PasswordGenerator;
 use wl_clipboard_rs::copy::{MimeType, Options, Source};
 
 const PW_CACHE: &str = "/tmp/.kpw";
 
 /// A KeePass entry.
-struct Entry<'a>(&'a keepass::db::Entry);
+struct Entry<'a>(&'a KEntry);
 impl Display for Entry<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let title = self.0.get_title().unwrap_or("(no title)");
@@ -25,6 +29,83 @@ impl Display for Entry<'_> {
 impl Entry<'_> {
     fn password(&self) -> Option<&str> {
         self.0.get_password()
+    }
+
+    fn username(&self) -> Option<&str> {
+        self.0.get_username()
+    }
+
+    fn url(&self) -> Option<&str> {
+        self.0.get_url()
+    }
+
+    fn notes(&self) -> Option<&str> {
+        self.0.fields.get("Notes").and_then(|val| match val {
+            Value::Unprotected(notes) => Some(notes.as_str()),
+            Value::Protected(data) => std::str::from_utf8(data.unsecure()).ok(),
+            _ => None,
+        })
+    }
+}
+
+/// For conveniently editing an entry.
+struct EditEntry<'a>(&'a mut KEntry);
+impl EditEntry<'_> {
+    fn set_title(&mut self) -> Result<()> {
+        let current = self.0.get_title().unwrap_or("");
+        let value = Text::new("Title: ")
+            .with_initial_value(current)
+            .with_validator(required!())
+            .prompt()?;
+        self.0
+            .fields
+            .insert("Title".to_string(), Value::Unprotected(value));
+        Ok(())
+    }
+
+    fn set_username(&mut self) -> Result<()> {
+        let current = self.0.get_username().unwrap_or("");
+        let value = Text::new("UserName: ")
+            .with_initial_value(current)
+            .with_validator(required!())
+            .prompt()?;
+        self.0
+            .fields
+            .insert("UserName".to_string(), Value::Unprotected(value));
+        Ok(())
+    }
+
+    fn set_notes(&mut self) -> Result<()> {
+        let entry = Entry(self.0);
+        let current = entry.notes().unwrap_or("");
+        let notes = Editor::new("Notes: ")
+            .with_predefined_text(current)
+            .prompt()?;
+        self.0.fields.insert(
+            "Notes".to_string(),
+            Value::Protected(notes.as_bytes().into()),
+        );
+        Ok(())
+    }
+
+    fn set_password(&mut self) -> Result<()> {
+        let pg = PasswordGenerator {
+            length: 12,
+            numbers: true,
+            lowercase_letters: true,
+            uppercase_letters: true,
+            symbols: true,
+            spaces: true,
+            exclude_similar_characters: false,
+            strict: true,
+        };
+        let password = pg.generate_one().unwrap();
+        println!("> Password generated.");
+        self.0.fields.insert(
+            "Password".to_string(),
+            Value::Protected(password.as_bytes().into()),
+        );
+        Ok(())
     }
 }
 
@@ -82,10 +163,12 @@ fn main() -> Result<()> {
     }
 
     let db_path = Path::new(&args[0]);
-    let db = if let Some(pass) = try_load_pass()? {
+
+    let (mut db, key) = if let Some(pass) = try_load_pass()? {
         let key = DatabaseKey::new().with_password(&pass);
         let mut file = File::open(db_path)?;
-        Database::open(&mut file, key).expect("Cache password is correct")
+        let db = Database::open(&mut file, key.clone()).expect("Cache password is correct");
+        (db, key)
     } else {
         loop {
             let pass = Password::new("Password:")
@@ -97,10 +180,10 @@ fn main() -> Result<()> {
 
             let key = DatabaseKey::new().with_password(&pass);
             let mut file = File::open(db_path)?;
-            match Database::open(&mut file, key) {
+            match Database::open(&mut file, key.clone()) {
                 Ok(db) => {
                     cache_pass(&pass)?;
-                    break db;
+                    break (db, key);
                 }
                 Err(err) => {
                     println!("! Failed to open database. Wrong password?");
@@ -110,6 +193,85 @@ fn main() -> Result<()> {
         }
     };
 
+    loop {
+        let action = Select::new(">", vec!["Search", "Edit", "New", "Quit"]).prompt()?;
+        match action {
+            "Quit" => {
+                break;
+            }
+            "Search" => {
+                let entry = pick_entry(&db)?;
+                view_entry(&entry)?
+            }
+            "New" => {
+                let entry = new_entry()?;
+
+                view_entry(&Entry(&entry))?;
+                let confirm = Confirm::new("Ok?").with_default(true).prompt()?;
+
+                if confirm {
+                    println!("> Saving...");
+                    db.root.add_child(entry);
+                    save_db(&db, key.clone(), db_path)?;
+                    println!("> Saved.");
+                }
+            }
+            "Edit" => {
+                let entry = pick_entry(&db)?;
+                view_entry(&entry)?;
+
+                let uuid = entry.0.get_uuid().as_u128();
+                let entry =
+                    get_entry_mut(&mut db, uuid).expect("We just checked that the entry exists");
+
+                edit_entry(entry)?;
+                save_db(&db, key.clone(), db_path)?;
+            }
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn get_entry_mut(db: &mut Database, uuid: u128) -> Option<&mut KEntry> {
+    _find_entry_mut(&mut db.root, uuid)
+}
+fn _find_entry_mut(group: &mut Group, uuid: u128) -> Option<&mut KEntry> {
+    for ch in &mut group.children {
+        match ch {
+            Node::Group(group) => {
+                if let Some(entry) = _find_entry_mut(group, uuid) {
+                    return Some(entry);
+                }
+            }
+            Node::Entry(entry) => {
+                if entry.get_uuid().as_u128() == uuid {
+                    return Some(entry);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn save_db(db: &Database, key: DatabaseKey, path: &Path) -> Result<()> {
+    // Backup file.
+    std::fs::copy(path, path.with_file_name(".backup.kdbx"))?;
+
+    // Write to temporary file first.
+    const TEMP_PATH: &str = "/tmp/.pass.kdbx";
+    let mut file = File::create(TEMP_PATH)?;
+    db.save(&mut file, key.clone())?;
+
+    // Then copy to the target file.
+    std::fs::copy(TEMP_PATH, path)?;
+    Ok(())
+}
+
+fn pick_entry(db: &Database) -> Result<Entry> {
     let entries: Vec<_> = db
         .root
         .into_iter()
@@ -123,6 +285,22 @@ fn main() -> Result<()> {
         .with_page_size(15)
         .prompt()?;
 
+    Ok(entry)
+}
+
+fn view_entry(entry: &Entry) -> Result<()> {
+    if let Some(username) = entry.username() {
+        println!("> Username: {}", username);
+    }
+    if let Some(url) = entry.url() {
+        println!("> Url: {}", url);
+    }
+    if let Some(notes) = entry.notes() {
+        println!("-- Notes ----------------");
+        println!("{}", notes);
+        println!("-------------------------");
+    }
+
     if let Some(pw) = entry.password() {
         let opts = Options::new();
         opts.copy(
@@ -132,5 +310,45 @@ fn main() -> Result<()> {
         println!("> Copied to clipboard!");
     }
 
+    Ok(())
+}
+
+fn new_entry() -> Result<KEntry> {
+    let mut entry = KEntry::new();
+    let mut edit = EditEntry(&mut entry);
+
+    edit.set_title()?;
+    edit.set_username()?;
+    edit.set_notes()?;
+    edit.set_password()?;
+
+    Ok(entry)
+}
+
+fn edit_entry(entry: &mut KEntry) -> Result<()> {
+    let mut edit = EditEntry(entry);
+
+    loop {
+        let action =
+            Select::new(">", vec!["Title", "UserName", "Notes", "Password", "Done"]).prompt()?;
+        match action {
+            "Title" => {
+                edit.set_title()?;
+            }
+            "UserName" => {
+                edit.set_username()?;
+            }
+            "Notes" => {
+                edit.set_notes()?;
+            }
+            "Password" => {
+                edit.set_password()?;
+            }
+            "Done" => {
+                break;
+            }
+            _ => unreachable!(),
+        }
+    }
     Ok(())
 }
