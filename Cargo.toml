@@ -1,11 +1,10 @@
 [package]
 name = "kpass"
-version = "0.1.0"
-edition = "2021"
+version = "1.0.0"
+edition = "2024"
 
 [dependencies]
 anyhow = "1.0.97"
-clipboard-ext = { version = "0.2.0", default-features = false, features = ["x11-bin"] }
 cocoon = "0.4.3"
 inquire = { version = "0.7.5", features = ["editor"] }
 keepass = { version = "0.7.31", features = ["save_kdbx4"] }
