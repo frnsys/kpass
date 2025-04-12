@@ -88,7 +88,21 @@ impl EditEntry<'_> {
         Ok(())
     }
 
-    fn set_password(&mut self) -> Result<()> {
+    fn set_manual_password(&mut self) -> Result<()> {
+        let entry = Entry(self.0);
+        let current = entry.password().unwrap_or("");
+        let password = Text::new("Password: ")
+            .with_initial_value(current)
+            .with_validator(required!())
+            .prompt()?;
+        self.0.fields.insert(
+            "Password".to_string(),
+            Value::Protected(password.as_bytes().into()),
+        );
+        Ok(())
+    }
+
+    fn set_random_password(&mut self) -> Result<()> {
         let pg = PasswordGenerator {
             length: 12,
             numbers: true,
@@ -320,7 +334,7 @@ fn new_entry() -> Result<KEntry> {
     edit.set_title()?;
     edit.set_username()?;
     edit.set_notes()?;
-    edit.set_password()?;
+    edit.set_random_password()?;
 
     Ok(entry)
 }
@@ -329,8 +343,18 @@ fn edit_entry(entry: &mut KEntry) -> Result<()> {
     let mut edit = EditEntry(entry);
 
     loop {
-        let action =
-            Select::new(">", vec!["Title", "UserName", "Notes", "Password", "Done"]).prompt()?;
+        let action = Select::new(
+            ">",
+            vec![
+                "Title",
+                "UserName",
+                "Notes",
+                "Password (Random)",
+                "Password (Manual)",
+                "Done",
+            ],
+        )
+        .prompt()?;
         match action {
             "Title" => {
                 edit.set_title()?;
@@ -341,8 +365,11 @@ fn edit_entry(entry: &mut KEntry) -> Result<()> {
             "Notes" => {
                 edit.set_notes()?;
             }
-            "Password" => {
-                edit.set_password()?;
+            "Password (Random)" => {
+                edit.set_random_password()?;
+            }
+            "Password (Manual)" => {
+                edit.set_manual_password()?;
             }
             "Done" => {
                 break;
