@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.81"
+anyhow = "1.0.97"
 clipboard-ext = { version = "0.2.0", default-features = false, features = ["x11-bin"] }
-cocoon = "0.4.1"
-inquire = { version = "0.7.1", features = ["editor"] }
-keepass = { version = "0.7.7", features = ["save_kdbx4"] }
+cocoon = "0.4.3"
+inquire = { version = "0.7.5", features = ["editor"] }
+keepass = { version = "0.7.31", features = ["save_kdbx4"] }
 passwords = "3.1.16"
 wl-clipboard-rs = "0.8.1"
