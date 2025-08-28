@@ -8,10 +8,10 @@ use std::{
 
 use anyhow::Result;
 use cocoon::Cocoon;
-use inquire::{required, Confirm, Editor, Password, PasswordDisplayMode, Select, Text};
+use inquire::{Confirm, Editor, Password, PasswordDisplayMode, Select, Text, required};
 use keepass::{
-    db::{Entry as KEntry, Group, Node, NodeRef, Value},
     Database, DatabaseKey,
+    db::{Entry as KEntry, Group, Node, NodeRef, Value},
 };
 use passwords::PasswordGenerator;
 use wl_clipboard_rs::copy::{MimeType, Options, Source};
@@ -285,7 +285,7 @@ fn save_db(db: &Database, key: DatabaseKey, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn pick_entry(db: &Database) -> Result<Entry> {
+fn pick_entry(db: &Database) -> Result<Entry<'_>> {
     let entries: Vec<_> = db
         .root
         .into_iter()
