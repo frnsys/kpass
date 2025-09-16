@@ -109,7 +109,7 @@ impl EditEntry<'_> {
             lowercase_letters: true,
             uppercase_letters: true,
             symbols: true,
-            spaces: true,
+            spaces: false,
             exclude_similar_characters: false,
             strict: true,
         };
