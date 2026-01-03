@@ -23,7 +23,7 @@ struct Entry<'a>(&'a KEntry);
 impl Display for Entry<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let title = self.0.get_title().unwrap_or("(no title)");
-        write!(f, "{}", title)
+        write!(f, "{title}")
     }
 }
 impl Entry<'_> {
@@ -43,7 +43,7 @@ impl Entry<'_> {
         self.0.fields.get("Notes").and_then(|val| match val {
             Value::Unprotected(notes) => Some(notes.as_str()),
             Value::Protected(data) => std::str::from_utf8(data.unsecure()).ok(),
-            _ => None,
+            Value::Bytes(_) => None,
         })
     }
 }
@@ -102,7 +102,7 @@ impl EditEntry<'_> {
         Ok(())
     }
 
-    fn set_random_password(&mut self) -> Result<()> {
+    fn set_random_password(&mut self) {
         let pg = PasswordGenerator {
             length: 12,
             numbers: true,
@@ -119,7 +119,6 @@ impl EditEntry<'_> {
             "Password".to_string(),
             Value::Protected(password.as_bytes().into()),
         );
-        Ok(())
     }
 }
 
@@ -201,7 +200,7 @@ fn main() -> Result<()> {
                 }
                 Err(err) => {
                     println!("! Failed to open database. Wrong password?");
-                    println!(">   {:?}", err);
+                    println!(">   {err:?}");
                 }
             }
         }
@@ -215,7 +214,7 @@ fn main() -> Result<()> {
             }
             "Search" => {
                 let entry = pick_entry(&db)?;
-                view_entry(&entry)?
+                view_entry(&entry)?;
             }
             "New" => {
                 let entry = new_entry()?;
@@ -226,7 +225,7 @@ fn main() -> Result<()> {
                 if confirm {
                     println!("> Saving...");
                     db.root.add_child(entry);
-                    save_db(&db, key.clone(), db_path)?;
+                    save_db(&db, &key, db_path)?;
                     println!("> Saved.");
                 }
             }
@@ -239,7 +238,7 @@ fn main() -> Result<()> {
                     get_entry_mut(&mut db, uuid).expect("We just checked that the entry exists");
 
                 edit_entry(entry)?;
-                save_db(&db, key.clone(), db_path)?;
+                save_db(&db, &key, db_path)?;
             }
             _ => {
                 unreachable!();
@@ -271,12 +270,13 @@ fn _find_entry_mut(group: &mut Group, uuid: u128) -> Option<&mut KEntry> {
     None
 }
 
-fn save_db(db: &Database, key: DatabaseKey, path: &Path) -> Result<()> {
+fn save_db(db: &Database, key: &DatabaseKey, path: &Path) -> Result<()> {
+    const TEMP_PATH: &str = "/tmp/.pass.kdbx";
+
     // Backup file.
     std::fs::copy(path, path.with_file_name(".backup.kdbx"))?;
 
     // Write to temporary file first.
-    const TEMP_PATH: &str = "/tmp/.pass.kdbx";
     let mut file = File::create(TEMP_PATH)?;
     db.save(&mut file, key.clone())?;
 
@@ -304,14 +304,14 @@ fn pick_entry(db: &Database) -> Result<Entry<'_>> {
 
 fn view_entry(entry: &Entry) -> Result<()> {
     if let Some(username) = entry.username() {
-        println!("> Username: {}", username);
+        println!("> Username: {username}");
     }
     if let Some(url) = entry.url() {
-        println!("> Url: {}", url);
+        println!("> Url: {url}");
     }
     if let Some(notes) = entry.notes() {
         println!("-- Notes ----------------");
-        println!("{}", notes);
+        println!("{notes}");
         println!("-------------------------");
     }
 
@@ -334,7 +334,7 @@ fn new_entry() -> Result<KEntry> {
     edit.set_title()?;
     edit.set_username()?;
     edit.set_notes()?;
-    edit.set_random_password()?;
+    edit.set_random_password();
 
     Ok(entry)
 }
@@ -366,7 +366,7 @@ fn edit_entry(entry: &mut KEntry) -> Result<()> {
                 edit.set_notes()?;
             }
             "Password (Random)" => {
-                edit.set_random_password()?;
+                edit.set_random_password();
             }
             "Password (Manual)" => {
                 edit.set_manual_password()?;
