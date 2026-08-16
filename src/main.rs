@@ -184,7 +184,7 @@ fn main() -> Result<()> {
         (db, key)
     } else {
         loop {
-            let pass = Password::new("Password:")
+            let pass = Password::new("Password (<c-r> to show):")
                 .with_display_toggle_enabled()
                 .with_display_mode(PasswordDisplayMode::Masked)
                 .with_formatter(&|_| String::from("🔑"))
